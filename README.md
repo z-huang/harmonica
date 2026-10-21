@@ -13,20 +13,17 @@ exactly.
 ## Transcribe a recording
 
 ```bash
-uvx harmonica-amt infer song.wav                 # writes song.mid
-uvx harmonica-amt infer song.flac -o out.mid     # choose where the MIDI goes
-uvx harmonica-amt infer song.wav --model my-run/checkpoint_latest.ckpt  # your own model
+uvx harmonica-amt song.wav                   # writes song.mid
+uvx harmonica-amt song.flac -o out.mid       # choose where the MIDI goes
+uvx harmonica-amt song.wav --model x-large   # the most accurate size; medium by default
 ```
 
 Input can be WAV, FLAC, MP3, or OGG. Inference runs on a GPU if there is one,
-otherwise on the CPU. Until the package is on PyPI, run it from GitHub:
-`uvx --from git+https://github.com/z-huang/harmonica harmonica infer song.wav`.
-(PyPI's `harmonica` is a geophysics package, hence `harmonica-amt`; once
-installed, the command is available as both.)
+otherwise on the CPU.
 
 ## Models
 
-`--model` takes one of Table 1's sizes or the path of a checkpoint. Each size
+`--model` takes one of the sizes below or the path of a checkpoint. Each size
 ships with the decoding thresholds its development-set sweep chose. Scores are
 the mean **OnP / OnPOff / Frm** over the paper's eight test sets:
 
@@ -64,8 +61,9 @@ picks another model, device, or thresholds.
 
 ```bash
 uv sync                                      # Python 3.12+, a CUDA GPU
+source .venv/bin/activate                    # puts harmonica on PATH
 harmonica prepare --workers 16               # index the eight corpora
-harmonica train --size medium                # one row of Table 1
+harmonica train --size medium                # one row of the table above
 harmonica eval --size medium \
     --checkpoint outputs/harmonica-medium/checkpoints/checkpoint_latest.ckpt
 ```
@@ -83,7 +81,7 @@ This repository reproduces the following paper; please cite it:
 ```bibtex
 @article{ou2026harmonica,
   title   = {Harmonica: Accurate and Lightweight Instrument-Agnostic Music Transcription},
-  author  = {Ou, Longshen and Martel, H{\'e}ctor and Hennessy-Priest, Joe and Cho, Taemin},
+  author  = {Longshen Ou and H{\'e}ctor Martel and Joe Hennessy-Priest and Taemin Cho},
   journal = {arXiv preprint arXiv:2609.04640},
   year    = {2026}
 }

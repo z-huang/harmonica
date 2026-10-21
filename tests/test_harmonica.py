@@ -2,6 +2,7 @@
 
 import json
 import math
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -528,6 +529,22 @@ def test_cli_has_prepare_train_infer_eval_export() -> None:
     assert result.exit_code == 0
     for command in ("prepare", "train", "infer", "eval", "export"):
         assert command in result.output
+
+
+def test_harmonica_amt_transcribes_without_a_subcommand(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from harmonica import cli
+
+    audio = tmp_path / "song.wav"
+    audio.touch()
+    requests = []
+    monkeypatch.setattr(cli, "run_infer", requests.append)
+    monkeypatch.setattr(sys, "argv", ["harmonica-amt", str(audio), "-o", "out.mid"])
+    with pytest.raises(SystemExit) as exited:
+        cli.transcribe()
+    assert exited.value.code == 0
+    assert [(r.audio, r.output) for r in requests] == [(audio, Path("out.mid"))]
 
 
 def test_exported_weights_are_the_checkpoint_without_cqt_kernels(

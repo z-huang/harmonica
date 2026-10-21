@@ -1,7 +1,8 @@
 """The ``harmonica`` command: ``prepare``, ``train``, ``infer``, ``eval``, ``export``.
 
 Installed bare, the package transcribes: ``prepare``, ``train``, and ``eval``
-need the ``train`` extra as well.
+need the ``train`` extra as well. ``harmonica-amt``, what ``uvx`` runs, is
+``infer`` alone, without the subcommand.
 """
 
 import re
@@ -40,11 +41,13 @@ app = typer.Typer(
 
 @app.callback()
 def _log_format(ctx: typer.Context) -> None:
-    """Log for a reader, not a debugger: no module, function, or line.
+    """``infer`` finishes in seconds, so its lines go without a timestamp."""
+    _configure_logging(timestamped=ctx.invoked_subcommand != "infer")
 
-    ``infer`` finishes in seconds, so its lines go without a timestamp.
-    """
-    stamp = "" if ctx.invoked_subcommand == "infer" else "<dim>{time:HH:mm:ss}</dim> "
+
+def _configure_logging(timestamped: bool) -> None:
+    """Log for a reader, not a debugger: no module, function, or line."""
+    stamp = "<dim>{time:HH:mm:ss}</dim> " if timestamped else ""
 
     def line(record: dict) -> str:
         level = record["level"].name
@@ -231,6 +234,12 @@ def infer_harmonica(
             frame_threshold=frame_threshold,
         )
     )
+
+
+def transcribe() -> None:
+    """``harmonica-amt song.wav -o song.mid``: ``infer`` as the whole command."""
+    _configure_logging(timestamped=False)
+    typer.run(infer_harmonica)
 
 
 @app.command("eval")
