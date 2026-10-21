@@ -12,3 +12,5 @@ wandb/
 
 # The paper's arXiv source: kept locally for reference, not redistributed.
 /paper/
+
+.env
