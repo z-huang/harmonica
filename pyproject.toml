@@ -1,0 +1,68 @@
+[project]
+# "harmonica" on PyPI is a geophysics package; the module is still harmonica.
+name = "harmonica-amt"
+version = "0.1.0"
+description = "A reproduction of Harmonica: Accurate and Lightweight Instrument-Agnostic Music Transcription"
+readme = "README.md"
+authors = [{ name = "Zion Huang" }]
+requires-python = ">=3.12"
+keywords = ["music transcription", "amt", "midi", "audio", "pytorch"]
+# Enough to transcribe; prepare, train, and eval need the train extra.
+dependencies = [
+    "loguru>=0.7",
+    "nnaudio>=0.3.4",
+    "numpy",
+    "omegaconf>=2.3",
+    # Resamples recordings to the model's 16 kHz.
+    "scipy",
+    "soundfile>=0.13",
+    "symusic>=0.6",
+    "torch",
+    "typer>=0.15",
+]
+
+[project.optional-dependencies]
+train = [
+    "lightning>=2.6",
+    # mir_eval scores notes as the paper does.
+    "mir-eval>=0.8",
+    # Slakh's metadata.
+    "pyyaml",
+    # REMI-z turns GuitarSet's JAMS into MIDI, as the paper did.
+    "remi-z>=0.7.4",
+    "wandb>=0.19",
+]
+
+[project.urls]
+Repository = "https://github.com/z-huang/harmonica"
+Paper = "https://arxiv.org/abs/2609.04640"
+
+[project.scripts]
+harmonica = "harmonica.cli:app"
+# What uvx runs for the distribution's own name: uvx harmonica-amt infer song.wav
+harmonica-amt = "harmonica.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11.17,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "harmonica"
+
+[dependency-groups]
+dev = [
+    "harmonica-amt[train]",
+    "pytest>=9.1",
+    "pytest-xdist>=3.6",
+    "ruff>=0.16",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

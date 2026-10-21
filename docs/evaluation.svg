@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1190" width="1240" height="1190" role="img" aria-labelledby="svg-title svg-desc">
+<title id="svg-title">Harmonica evaluation</title>
+<desc id="svg-desc">The flow of harmonica eval. A checkpoint is loaded. The 110 development recordings are transcribed whole on the GPU, in 5 second chunks overlapping by half with the middle half of each kept, and their onset and sustain probabilities are held in memory. The onset and frame thresholds are either given on the command line or swept on the development activations in two stages: the onset threshold for OnP with the frame threshold held at 0.5, then the frame threshold for OnPOff at the chosen onset threshold, each walked from 0.85 down to 0.10, skipping thresholds whose best possible F1 cannot beat the best so far. The development set is scored at the chosen thresholds, giving Table 2's numbers. Then each test set is transcribed the same way, decoded at the thresholds, and each recording scored for OnP, OnPOff and Frm by worker processes; the mean over recordings is written to report.json and report.md after every set. Side panels show the chunking, the sweep on a grid of thresholds, the three metrics, and the worker pool.</desc>
+<style>
+@media (prefers-color-scheme: dark) {
+  .page { fill: #0f1216; }
+  .panel { fill: #171b21; stroke: #2a3038; }
+  .group { fill: #14181e; stroke: #3d4653; }
+  .io { fill: #12161b; stroke: #4b5563; }
+  .fixed { fill: #33240c; stroke: #d7a15c; }
+  .conv { fill: #0f2e2a; stroke: #3fbfae; }
+  .harm { fill: #271a3f; stroke: #a78bfa; }
+  .bar { fill: #1d222a; stroke: #4b5563; }
+  .pad { fill: #33240c; stroke: #d7a15c; }
+  .cell { fill: #1d222a; stroke: #2a3038; }
+  .stage1 { fill: #3b2a66; stroke: #a78bfa; }
+  .stage2 { fill: #0f3d37; stroke: #3fbfae; }
+  .pruned { fill: #14181e; stroke: #2a3038; }
+  .pick { fill: #f0c987; stroke: #f0c987; }
+  .flow { stroke: #98a2b3; }
+  .loop { stroke: #98a2b3; }
+  .mk-flow { fill: #98a2b3; }
+  .rule { stroke: #2a3038; }
+  .h1, .title, .paneltitle { fill: #e7eaf0; }
+  .sub, .detail, .body { fill: #a0a9b8; }
+  .sub2, .shape, .colhead, .axis { fill: #7d8697; }
+  .fixedtitle { fill: #f0c987; }
+  .harmtitle { fill: #c4b5fd; }
+  .convtitle { fill: #7fe0d2; }
+  .tag-gpu { fill: #7fe0d2; }
+  .tag-cpu { fill: #c4b5fd; }
+  .code { fill: #d6dae2; }
+}
+</style>
+<defs>
+<marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="mk-flow" fill="#545c6a"/></marker>
+<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#d7a15c" stroke-width="2"/></pattern>
+</defs>
+<rect x="0" y="0" width="1240" height="1190" class="page" fill="#ffffff"/>
+<g font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+
+<text x="60" y="54" class="h1" font-size="25" font-weight="700" fill="#14161a">Harmonica evaluation</text>
+<text x="60" y="80" class="sub" font-size="13" fill="#5b6472">harmonica eval: thresholds chosen on the development set, then every test set scored at them, as Section 4.1 and Appendix D describe.</text>
+<text x="60" y="100" class="sub2" font-size="12" fill="#8a93a3">Teal steps run on the GPU, purple ones in a pool of CPU workers; amber is what gets written. Counts are this repo's manifest.</text>
+
+<!-- ======================= main flow ======================= -->
+
+<!-- checkpoint -->
+<rect x="110" y="130" width="480" height="52" rx="8" class="io" fill="#ffffff" stroke="#9aa3b0" stroke-width="1.3"/>
+<text x="130" y="153" class="title" font-size="14" font-weight="700" fill="#14161a">Checkpoint</text>
+<text x="570" y="153" class="shape" font-size="11" fill="#8a93a3" text-anchor="end">load_checkpoint</text>
+<text x="130" y="171" class="detail" font-size="12" fill="#5b6472">weights, training config and step; its model block must match</text>
+<line x1="350" y1="182" x2="350" y2="204" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- dev set -->
+<rect x="110" y="208" width="480" height="52" rx="8" class="io" fill="#ffffff" stroke="#9aa3b0" stroke-width="1.3"/>
+<text x="130" y="231" class="title" font-size="14" font-weight="700" fill="#14161a">Development set</text>
+<text x="570" y="231" class="shape" font-size="11" fill="#8a93a3" text-anchor="end">dev.json · 110 recordings</text>
+<text x="130" y="249" class="detail" font-size="12" fill="#5b6472">held out of training by prepare, temperature-sampled from every source</text>
+<line x1="350" y1="260" x2="350" y2="282" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- dev inference -->
+<rect x="110" y="286" width="480" height="64" rx="8" class="conv" fill="#e6f5f2" stroke="#2a9d8f" stroke-width="1.3"/>
+<text x="130" y="309" class="convtitle" font-size="14" font-weight="700" fill="#1d6f65">Chunked inference</text>
+<text x="570" y="309" class="tag-gpu" font-size="11" font-weight="700" fill="#2a9d8f" text-anchor="end">GPU · panel A</text>
+<text x="130" y="329" class="detail" font-size="12" fill="#3b4250">whole recording → onset and sustain probabilities [88, T];</text>
+<text x="130" y="344" class="detail" font-size="12" fill="#3b4250">every recording's stay in memory for the steps below</text>
+<line x1="350" y1="350" x2="350" y2="372" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- thresholds -->
+<rect x="110" y="376" width="480" height="76" rx="8" class="harm" fill="#f1ecfe" stroke="#7c5cd6" stroke-width="1.3"/>
+<text x="130" y="399" class="harmtitle" font-size="14" font-weight="700" fill="#5b3cc4">Thresholds θon, θfr</text>
+<text x="570" y="399" class="tag-cpu" font-size="11" font-weight="700" fill="#7c5cd6" text-anchor="end">CPU workers · panel B</text>
+<text x="130" y="420" class="detail" font-size="12" fill="#3b4250">given (--onset-threshold, --frame-threshold): used as they are</text>
+<text x="130" y="438" class="detail" font-size="12" fill="#3b4250">otherwise: the two-stage sweep on the development activations</text>
+<line x1="350" y1="452" x2="350" y2="474" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- dev score -->
+<rect x="110" y="478" width="480" height="52" rx="8" class="harm" fill="#f1ecfe" stroke="#7c5cd6" stroke-width="1.3"/>
+<text x="130" y="501" class="harmtitle" font-size="14" font-weight="700" fill="#5b3cc4">Score the development set at θon, θfr</text>
+<text x="130" y="519" class="detail" font-size="12" fill="#3b4250">OnP, OnPOff, Frm → report.dev: Table 2's numbers</text>
+<line x1="350" y1="530" x2="350" y2="560" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- per test set group -->
+<rect x="90" y="564" width="520" height="412" rx="12" class="group" fill="#f6f7f9" stroke="#c4cad3" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="106" y="586" class="colhead" font-size="11" font-weight="700" fill="#8a93a3" letter-spacing="1">FOR EACH SET IN evaluation.test_sets</text>
+
+<rect x="110" y="598" width="480" height="64" rx="8" class="io" fill="#ffffff" stroke="#9aa3b0" stroke-width="1.3"/>
+<text x="130" y="620" class="title" font-size="14" font-weight="700" fill="#14161a">Its test recordings</text>
+<text x="570" y="620" class="shape" font-size="11" fill="#8a93a3" text-anchor="end">splits[TEST]</text>
+<text x="130" y="640" class="detail" font-size="12" fill="#5b6472">maestro 177 · maps 60 · guitarset 240 · gaps 30 · egdb 150 · goat 42 · urmp 32</text>
+<text x="130" y="655" class="detail" font-size="12" fill="#5b6472">slakh 1,388 · a set with none prepared is skipped with a warning</text>
+<line x1="350" y1="662" x2="350" y2="680" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<rect x="110" y="684" width="480" height="50" rx="8" class="conv" fill="#e6f5f2" stroke="#2a9d8f" stroke-width="1.3"/>
+<text x="130" y="706" class="convtitle" font-size="14" font-weight="700" fill="#1d6f65">Chunked inference</text>
+<text x="570" y="706" class="tag-gpu" font-size="11" font-weight="700" fill="#2a9d8f" text-anchor="end">GPU · panel A</text>
+<text x="130" y="724" class="detail" font-size="12" fill="#3b4250">as for dev; each recording timed, for xRT</text>
+<line x1="350" y1="734" x2="350" y2="752" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<rect x="110" y="756" width="480" height="64" rx="8" class="harm" fill="#f1ecfe" stroke="#7c5cd6" stroke-width="1.3"/>
+<text x="130" y="778" class="harmtitle" font-size="14" font-weight="700" fill="#5b3cc4">Decode at θon, θfr</text>
+<text x="570" y="778" class="tag-cpu" font-size="11" font-weight="700" fill="#7c5cd6" text-anchor="end">CPU workers</text>
+<text x="130" y="798" class="detail" font-size="12" fill="#3b4250">a note opens at each onset peak ≥ θon and holds while sustain ≥ θfr,</text>
+<text x="130" y="813" class="detail" font-size="12" fill="#3b4250">ending early at the key's next onset; at least one frame long</text>
+<line x1="350" y1="820" x2="350" y2="838" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<rect x="110" y="842" width="480" height="50" rx="8" class="harm" fill="#f1ecfe" stroke="#7c5cd6" stroke-width="1.3"/>
+<text x="130" y="864" class="harmtitle" font-size="14" font-weight="700" fill="#5b3cc4">Score every recording</text>
+<text x="570" y="864" class="tag-cpu" font-size="11" font-weight="700" fill="#7c5cd6" text-anchor="end">CPU workers · panel C</text>
+<text x="130" y="882" class="detail" font-size="12" fill="#3b4250">OnP · OnPOff · Frm against its reference notes</text>
+<line x1="350" y1="892" x2="350" y2="910" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<rect x="110" y="914" width="480" height="50" rx="8" class="fixed" fill="#fdf3e3" stroke="#c98a2e" stroke-width="1.3"/>
+<text x="130" y="936" class="fixedtitle" font-size="14" font-weight="700" fill="#9a5b12">Mean over recordings → report.test[set]</text>
+<text x="130" y="954" class="detail" font-size="12" fill="#3b4250">report.json and report.md rewritten after every set</text>
+
+<!-- loop back -->
+<path d="M 590 939 C 640 939, 640 924, 640 884 L 640 655 C 640 630, 625 630, 594 630" class="loop" fill="none" stroke="#545c6a" stroke-width="1.4" marker-end="url(#tip)"/>
+<text x="648" y="800" class="sub2" font-size="11" fill="#8a93a3">next set</text>
+
+<line x1="350" y1="976" x2="350" y2="1002" class="flow" stroke="#545c6a" stroke-width="1.5" marker-end="url(#tip)"/>
+
+<!-- report -->
+<rect x="110" y="1006" width="480" height="112" rx="8" class="fixed" fill="#fdf3e3" stroke="#c98a2e" stroke-width="1.3"/>
+<text x="130" y="1029" class="fixedtitle" font-size="14" font-weight="700" fill="#9a5b12">Report</text>
+<text x="570" y="1029" class="shape" font-size="11" fill="#8a93a3" text-anchor="end">evaluation.output_dir/&lt;name&gt;/&lt;checkpoint stem&gt;/</text>
+<text x="130" y="1052" class="code" font-size="12" font-weight="600" fill="#14161a">report.json</text>
+<text x="220" y="1052" class="detail" font-size="12" fill="#3b4250">step, parameters, thresholds, the sweep's trace,</text>
+<text x="220" y="1068" class="detail" font-size="12" fill="#3b4250">dev, test (with every recording's scores), xRT</text>
+<text x="130" y="1088" class="code" font-size="12" font-weight="600" fill="#14161a">report.md</text>
+<text x="220" y="1088" class="detail" font-size="12" fill="#3b4250">one row: OnP · OnPOff · Frm per set (Tables 1, 4, 5)</text>
+<text x="130" y="1106" class="code" font-size="12" font-weight="600" fill="#14161a">midi/</text>
+<text x="220" y="1106" class="detail" font-size="12" fill="#3b4250">&lt;set&gt;/&lt;key&gt;.mid, only with evaluation.write_midi</text>
+
+<text x="110" y="1142" class="sub2" font-size="11" fill="#8a93a3">Each set's activations stay in memory until it is scored:</text>
+<text x="110" y="1157" class="sub2" font-size="11" fill="#8a93a3">Slakh's 1,388 stems (102 hours) take about 8 GB of float32.</text>
+
+<!-- ======================= panel A: chunked inference ======================= -->
+<rect x="700" y="130" width="480" height="274" rx="12" class="panel" fill="#fafbfc" stroke="#e1e4e9" stroke-width="1.2"/>
+<text x="720" y="158" class="paneltitle" font-size="15" font-weight="700" fill="#14161a">A · Chunked inference ("half", Appendix D)</text>
+<text x="720" y="182" class="body" font-size="12" fill="#5b6472">The log-CQT of the whole recording (32 ms frames) is cut into</text>
+<text x="720" y="198" class="body" font-size="12" fill="#5b6472">156-frame (5 s) chunks every 78 frames. Each chunk's middle 78</text>
+<text x="720" y="214" class="body" font-size="12" fill="#5b6472">frames are kept and stitched: every kept frame saw 39 frames</text>
+<text x="720" y="230" class="body" font-size="12" fill="#5b6472">(1.25 s) of context on either side.</text>
+<!-- sketch: spectrogram with pads, then staggered chunks -->
+<rect x="720" y="250" width="39" height="12" class="pad" fill="url(#hatch)" stroke="#c98a2e" stroke-width="1"/>
+<rect x="759" y="250" width="351" height="12" rx="1" class="bar" fill="#f1f2f5" stroke="#b5bcc7" stroke-width="1"/>
+<rect x="1110" y="250" width="50" height="12" class="pad" fill="url(#hatch)" stroke="#c98a2e" stroke-width="1"/>
+<text x="935" y="245" class="sub2" font-size="10" fill="#8a93a3" text-anchor="middle">log-CQT, T frames</text>
+<rect x="720" y="270" width="156" height="11" rx="2" class="bar" fill="#f1f2f5" stroke="#b5bcc7" stroke-width="1"/>
+<rect x="759" y="270" width="78" height="11" class="conv" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<rect x="798" y="286" width="156" height="11" rx="2" class="bar" fill="#f1f2f5" stroke="#b5bcc7" stroke-width="1"/>
+<rect x="837" y="286" width="78" height="11" class="conv" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<rect x="876" y="302" width="156" height="11" rx="2" class="bar" fill="#f1f2f5" stroke="#b5bcc7" stroke-width="1"/>
+<rect x="915" y="302" width="78" height="11" class="conv" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<rect x="954" y="318" width="156" height="11" rx="2" class="bar" fill="#f1f2f5" stroke="#b5bcc7" stroke-width="1"/>
+<rect x="993" y="318" width="78" height="11" class="conv" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<text x="1080" y="300" class="sub2" font-size="10" fill="#8a93a3">kept middles,</text>
+<text x="1080" y="312" class="sub2" font-size="10" fill="#8a93a3">stitched</text>
+<text x="720" y="350" class="body" font-size="12" fill="#5b6472">Hatched: padding at the log-CQT's floor, log(1e-5), the silence a</text>
+<text x="720" y="366" class="body" font-size="12" fill="#5b6472">training clip's padded tail reads. 32 chunks a batch, bf16.</text>
+<text x="720" y="382" class="sub2" font-size="11" fill="#8a93a3">xRT = audio seconds ÷ seconds spent on CQT, network and stitching;</text>
+<text x="720" y="396" class="sub2" font-size="11" fill="#8a93a3">reading and resampling the files is not counted.</text>
+
+<!-- ======================= panel B: sweep ======================= -->
+<rect x="700" y="424" width="480" height="346" rx="12" class="panel" fill="#fafbfc" stroke="#e1e4e9" stroke-width="1.2"/>
+<text x="720" y="452" class="paneltitle" font-size="15" font-weight="700" fill="#14161a">B · Threshold sweep (Appendix D)</text>
+<!-- grid: 16 x 16, θon 0.10..0.85 left to right, θfr 0.10..0.85 bottom to top; cell 12 px -->
+<g transform="translate(748 474)">
+<rect x="0" y="0" width="192" height="192" class="cell" fill="#f1f2f5" stroke="#e1e4e9" stroke-width="1"/>
+<g class="rule" stroke="#e1e4e9" stroke-width="1">
+<line x1="12" y1="0" x2="12" y2="192"/><line x1="24" y1="0" x2="24" y2="192"/><line x1="36" y1="0" x2="36" y2="192"/><line x1="48" y1="0" x2="48" y2="192"/><line x1="60" y1="0" x2="60" y2="192"/><line x1="72" y1="0" x2="72" y2="192"/><line x1="84" y1="0" x2="84" y2="192"/><line x1="96" y1="0" x2="96" y2="192"/><line x1="108" y1="0" x2="108" y2="192"/><line x1="120" y1="0" x2="120" y2="192"/><line x1="132" y1="0" x2="132" y2="192"/><line x1="144" y1="0" x2="144" y2="192"/><line x1="156" y1="0" x2="156" y2="192"/><line x1="168" y1="0" x2="168" y2="192"/><line x1="180" y1="0" x2="180" y2="192"/>
+<line x1="0" y1="12" x2="192" y2="12"/><line x1="0" y1="24" x2="192" y2="24"/><line x1="0" y1="36" x2="192" y2="36"/><line x1="0" y1="48" x2="192" y2="48"/><line x1="0" y1="60" x2="192" y2="60"/><line x1="0" y1="72" x2="192" y2="72"/><line x1="0" y1="84" x2="192" y2="84"/><line x1="0" y1="96" x2="192" y2="96"/><line x1="0" y1="108" x2="192" y2="108"/><line x1="0" y1="120" x2="192" y2="120"/><line x1="0" y1="132" x2="192" y2="132"/><line x1="0" y1="144" x2="192" y2="144"/><line x1="0" y1="156" x2="192" y2="156"/><line x1="0" y1="168" x2="192" y2="168"/><line x1="0" y1="180" x2="192" y2="180"/>
+</g>
+<!-- stage 1: row θfr = 0.50 (index 8 from the bottom: y = 192 - 9*12 = 84) -->
+<rect x="0" y="84" width="192" height="12" class="stage1" fill="#d9cdfb" stroke="#7c5cd6" stroke-width="1"/>
+<!-- stage 2: column θon = 0.30 (index 4: x = 48) -->
+<rect x="48" y="0" width="12" height="192" class="stage2" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<!-- pick: θon 0.30, θfr 0.40 (index 6 from the bottom: y = 192 - 7*12 = 108) -->
+<rect x="48" y="108" width="12" height="12" class="pick" fill="#e0a43c" stroke="#9a5b12" stroke-width="1.2"/>
+<!-- walk arrows -->
+<line x1="186" y1="-8" x2="8" y2="-8" class="flow" stroke="#7c5cd6" stroke-width="1.4" marker-end="url(#tip)"/>
+<line x1="70" y1="6" x2="70" y2="186" class="flow" stroke="#2a9d8f" stroke-width="1.4" marker-end="url(#tip)"/>
+<text x="0" y="208" class="axis" font-size="10" fill="#8a93a3">0.10</text>
+<text x="192" y="208" class="axis" font-size="10" fill="#8a93a3" text-anchor="end">0.85</text>
+<text x="96" y="222" class="axis" font-size="11" fill="#5b6472" text-anchor="middle">θon →</text>
+<text x="-6" y="192" class="axis" font-size="10" fill="#8a93a3" text-anchor="end">0.10</text>
+<text x="-6" y="9" class="axis" font-size="10" fill="#8a93a3" text-anchor="end">0.85</text>
+<text x="-6" y="100" class="axis" font-size="11" fill="#5b6472" text-anchor="end">θfr</text>
+</g>
+<g font-size="12">
+<rect x="964" y="478" width="10" height="10" class="stage1" fill="#d9cdfb" stroke="#7c5cd6" stroke-width="1"/>
+<text x="980" y="488" class="title" font-weight="700" fill="#14161a">Stage 1 · OnP</text>
+<text x="964" y="506" class="body" fill="#5b6472">θfr held at 0.5 (OnP never</text>
+<text x="964" y="522" class="body" fill="#5b6472">reads it); θon walked from</text>
+<text x="964" y="538" class="body" fill="#5b6472">0.85 down to 0.10</text>
+<rect x="964" y="556" width="10" height="10" class="stage2" fill="#b8e4dd" stroke="#2a9d8f" stroke-width="1"/>
+<text x="980" y="566" class="title" font-weight="700" fill="#14161a">Stage 2 · OnPOff</text>
+<text x="964" y="584" class="body" fill="#5b6472">θon fixed at stage 1's best;</text>
+<text x="964" y="600" class="body" fill="#5b6472">θfr walked 0.85 → 0.10</text>
+<rect x="964" y="618" width="10" height="10" class="pick" fill="#e0a43c" stroke="#9a5b12" stroke-width="1.2"/>
+<text x="980" y="628" class="title" font-weight="700" fill="#14161a">Chosen</text>
+<text x="964" y="646" class="body" fill="#5b6472">harmonica-medium, 100k:</text>
+<text x="964" y="662" class="body" fill="#5b6472">θon 0.30, θfr 0.40</text>
+</g>
+<line x1="720" y1="708" x2="1160" y2="708" class="rule" stroke="#e1e4e9" stroke-width="1"/>
+<text x="720" y="728" class="sub2" font-size="11" fill="#8a93a3">Skipped unscored: a threshold whose mean 2·min(r, e) / (r + e) over</text>
+<text x="720" y="742" class="sub2" font-size="11" fill="#8a93a3">recordings, an upper bound on F1 for r reference and e decoded notes,</text>
+<text x="720" y="756" class="sub2" font-size="11" fill="#8a93a3">cannot beat the best so far. Decoding is cheap; mir_eval is not.</text>
+
+<!-- ======================= panel C: metrics ======================= -->
+<rect x="700" y="790" width="480" height="196" rx="12" class="panel" fill="#fafbfc" stroke="#e1e4e9" stroke-width="1.2"/>
+<text x="720" y="818" class="paneltitle" font-size="15" font-weight="700" fill="#14161a">C · Metrics (Section 4.1), per recording</text>
+<text x="720" y="844" class="title" font-size="12" font-weight="700" fill="#14161a">OnP</text>
+<text x="790" y="844" class="body" font-size="12" fill="#5b6472">onset within 50 ms, pitch within 50 cents (mir_eval)</text>
+<text x="720" y="866" class="title" font-size="12" font-weight="700" fill="#14161a">OnPOff</text>
+<text x="790" y="866" class="body" font-size="12" fill="#5b6472">and offset within max(0.2 · reference duration, 50 ms)</text>
+<text x="720" y="888" class="title" font-size="12" font-weight="700" fill="#14161a">Frm</text>
+<text x="790" y="888" class="body" font-size="12" fill="#5b6472">both note lists drawn on a 25 ms piano roll, F1 over</text>
+<text x="790" y="904" class="body" font-size="12" fill="#5b6472">(key, frame) cells: one grid for every model</text>
+<line x1="720" y1="920" x2="1160" y2="920" class="rule" stroke="#e1e4e9" stroke-width="1"/>
+<text x="720" y="940" class="body" font-size="12" fill="#5b6472">Both lists empty scores 1, one empty scores 0. A set's score is</text>
+<text x="720" y="956" class="body" font-size="12" fill="#5b6472">the plain mean over its recordings, so a one-minute clip counts</text>
+<text x="720" y="972" class="body" font-size="12" fill="#5b6472">as much as a twenty-minute sonata.</text>
+
+<!-- ======================= panel D: workers ======================= -->
+<rect x="700" y="1006" width="480" height="158" rx="12" class="panel" fill="#fafbfc" stroke="#e1e4e9" stroke-width="1.2"/>
+<text x="720" y="1034" class="paneltitle" font-size="15" font-weight="700" fill="#14161a">D · CPU workers (evaluation.workers, 16)</text>
+<text x="720" y="1058" class="body" font-size="12" fill="#5b6472">mir_eval is single-threaded, and the sweep scores every dev</text>
+<text x="720" y="1074" class="body" font-size="12" fill="#5b6472">recording once a threshold. Workers are forked after inference,</text>
+<text x="720" y="1090" class="body" font-size="12" fill="#5b6472">so they inherit the activations instead of being sent them.</text>
+<text x="720" y="1110" class="body" font-size="12" fill="#5b6472">Each threshold: decode all recordings in parallel → check the</text>
+<text x="720" y="1126" class="body" font-size="12" fill="#5b6472">bound → score them in parallel. A step lasts as long as its</text>
+<text x="720" y="1142" class="body" font-size="12" fill="#5b6472">slowest recording, so long MAESTRO pieces cap the speed-up.</text>
+
+</g>
+</svg>
