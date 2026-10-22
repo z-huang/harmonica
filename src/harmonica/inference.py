@@ -112,7 +112,7 @@ class Harmonica:
         onset_threshold: float | None = None,
         frame_threshold: float | None = None,
         chunk_seconds: float = 5.0,
-        batch_size: int = 32,
+        batch_size: int = 8,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
