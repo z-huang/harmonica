@@ -1,7 +1,7 @@
 [project]
 # "harmonica" on PyPI is a geophysics package; the module is still harmonica.
 name = "harmonica-amt"
-version = "0.2.0"
+version = "0.2.1"
 description = "A reproduction of Harmonica: Accurate and Lightweight Instrument-Agnostic Music Transcription"
 readme = "README.md"
 authors = [{ name = "Zion Huang" }]
