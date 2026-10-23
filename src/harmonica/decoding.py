@@ -79,23 +79,48 @@ def note_f1(
     offset_ratio: float | None,
     offset_min_tolerance: float,
 ) -> float:
-    """mir_eval's note F1, with or without the offset criterion."""
+    """mir_eval's note F1, with or without the offset criterion.
+
+    Matched one pitch at a time. mir_eval pairs notes within 50 cents, and
+    the keys are 100 apart, so only notes on one key can match: the maximum
+    matching of the whole is the sum of each key's, and the F1 is the same.
+    mir_eval builds a dense reference-by-estimate graph, so on a 23-minute
+    MAESTRO piece (15k notes) this is hundreds of times faster.
+    """
     import mir_eval
 
     if len(reference) == 0 and len(estimate) == 0:
         return 1.0
     if len(reference) == 0 or len(estimate) == 0:
         return 0.0
-    _, _, f1, _ = mir_eval.transcription.precision_recall_f1_overlap(
+    reference_intervals, estimate_intervals = (
         _intervals(reference),
-        _hz(reference.pitches),
         _intervals(estimate),
-        _hz(estimate.pitches),
-        onset_tolerance=onset_tolerance,
-        offset_ratio=offset_ratio,
-        offset_min_tolerance=offset_min_tolerance,
     )
-    return float(f1)
+    mir_eval.transcription.validate(
+        reference_intervals,
+        _hz(reference.pitches),
+        estimate_intervals,
+        _hz(estimate.pitches),
+    )
+    matched = 0
+    for pitch in np.intersect1d(reference.pitches, estimate.pitches):
+        on_reference = reference.pitches == pitch
+        on_estimate = estimate.pitches == pitch
+        matched += len(
+            mir_eval.transcription.match_notes(
+                reference_intervals[on_reference],
+                _hz(reference.pitches[on_reference]),
+                estimate_intervals[on_estimate],
+                _hz(estimate.pitches[on_estimate]),
+                onset_tolerance=onset_tolerance,
+                offset_ratio=offset_ratio,
+                offset_min_tolerance=offset_min_tolerance,
+            )
+        )
+    precision = matched / len(estimate)
+    recall = matched / len(reference)
+    return float(mir_eval.util.f_measure(precision, recall))
 
 
 def piano_roll(notes: Notes, frame_seconds: float, frames: int) -> np.ndarray:

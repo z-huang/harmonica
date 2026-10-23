@@ -197,6 +197,49 @@ def test_perfect_transcription_scores_one() -> None:
     assert (result.onset, result.onset_offset, result.frame) == (1.0, 1.0, 1.0)
 
 
+@pytest.mark.parametrize("offset_ratio", [None, 0.2])
+def test_note_f1_one_pitch_at_a_time_is_mir_evals(offset_ratio: float | None) -> None:
+    import mir_eval
+
+    from harmonica.decoding import _hz, _intervals, note_f1
+
+    rng = np.random.default_rng(0)
+
+    def notes(count: int) -> Notes:
+        # Few keys and a short span, so one key's notes crowd its tolerance
+        # windows and the matching has real choices to make.
+        onsets = rng.uniform(0, 4, count)
+        return Notes(
+            onsets, onsets + rng.uniform(0.02, 1.0, count), rng.integers(60, 64, count)
+        )
+
+    for _ in range(50):
+        reference, estimate = notes(rng.integers(1, 80)), notes(rng.integers(1, 80))
+        # Some estimates sit just inside or outside 50 ms of a reference.
+        near = min(len(reference), len(estimate)) // 2
+        jitter = rng.uniform(-0.06, 0.06, near)
+        estimate.onsets[:near] = np.maximum(reference.onsets[:near] + jitter, 0.0)
+        estimate.offsets[:] = np.maximum(estimate.offsets, estimate.onsets + 0.02)
+        estimate.pitches[:near] = reference.pitches[:near]
+        _, _, expected, _ = mir_eval.transcription.precision_recall_f1_overlap(
+            _intervals(reference),
+            _hz(reference.pitches),
+            _intervals(estimate),
+            _hz(estimate.pitches),
+            onset_tolerance=0.05,
+            offset_ratio=offset_ratio,
+            offset_min_tolerance=0.05,
+        )
+        got = note_f1(
+            reference,
+            estimate,
+            onset_tolerance=0.05,
+            offset_ratio=offset_ratio,
+            offset_min_tolerance=0.05,
+        )
+        assert got == pytest.approx(expected, abs=1e-12)
+
+
 def test_frame_f1_counts_frames_on_the_25_ms_grid() -> None:
     reference = _notes((0.0, 0.1, 60))  # four frames
     estimate = _notes((0.05, 0.15, 60))  # two of them, two more
