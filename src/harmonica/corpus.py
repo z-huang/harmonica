@@ -3,7 +3,8 @@
 ``prepare`` walks every configured source once and writes, under
 ``data.cache_dir``:
 
-* ``notes/<source>/<key>.npz`` -- onset, offset (seconds), and pitch arrays;
+* ``notes/<source>/<key>.npz`` -- onset, offset (seconds), pitch, and velocity
+  arrays;
 * ``audio/<source>/<key>.flac`` -- 16 kHz mono, for sources whose audio is only
   readable inside a zip (MAPS here) or that need mixing first
   (GuitarSet's pickup, summed from its six hexaphonic strings), and, with
@@ -69,11 +70,22 @@ class Recording:
 
 @dataclass(frozen=True)
 class Notes:
-    """Notes as three parallel arrays, in seconds and MIDI pitch."""
+    """Notes as parallel arrays, in seconds, MIDI pitch, and MIDI velocity.
+
+    A velocity of 0, which no MIDI note-on carries, is unknown: the annotation
+    gives none, or gives every note the same one.
+    """
 
     onsets: np.ndarray
     offsets: np.ndarray
     pitches: np.ndarray
+    velocities: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.velocities is None:
+            object.__setattr__(
+                self, "velocities", np.zeros(len(self.pitches), dtype=np.uint8)
+            )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,42 +94,62 @@ class Notes:
             onsets=self.onsets.astype(np.float64),
             offsets=self.offsets.astype(np.float64),
             pitches=self.pitches.astype(np.int16),
+            velocities=self.velocities.astype(np.uint8),
         )
 
     @classmethod
     def load(cls, path: str | Path) -> "Notes":
+        """Notes saved before velocities were kept load with them unknown."""
         with np.load(path) as stored:
-            return cls(stored["onsets"], stored["offsets"], stored["pitches"])
+            velocities = stored["velocities"] if "velocities" in stored else None
+            return cls(
+                stored["onsets"], stored["offsets"], stored["pitches"], velocities
+            )
 
     @classmethod
-    def from_rows(cls, rows: list[tuple[float, float, int]]) -> "Notes":
-        """Keep the notes on the 88 keys that last a positive time, sorted."""
+    def from_rows(
+        cls, rows: list[tuple[float, float, int] | tuple[float, float, int, int]]
+    ) -> "Notes":
+        """Keep the notes on the 88 keys that last a positive time, sorted.
+
+        A row is ``(onset, offset, pitch)``, or with a velocity after; without
+        one the velocity is unknown.
+        """
         kept = sorted(
-            (on, off, p)
-            for on, off, p in rows
+            (on, off, p, *(rest or (0,)))
+            for on, off, p, *rest in rows
             if MIN_PITCH <= p <= MAX_PITCH and off > on
         )
         if not kept:
             return cls(np.zeros(0), np.zeros(0), np.zeros(0, dtype=np.int16))
-        on, off, pitch = zip(*kept, strict=True)
-        return cls(np.array(on), np.array(off), np.array(pitch, dtype=np.int16))
+        on, off, pitch, velocity = zip(*kept, strict=True)
+        return cls(
+            np.array(on),
+            np.array(off),
+            np.array(pitch, dtype=np.int16),
+            np.array(velocity, dtype=np.uint8),
+        )
 
     def __len__(self) -> int:
         return len(self.pitches)
 
     def save_midi(self, path: str | Path) -> None:
-        """One piano track at 120 BPM, every note at velocity 80."""
+        """One piano track at 120 BPM; a note of unknown velocity plays at 80."""
         import symusic
 
         score = symusic.Score(480, ttype="second")
         score.tempos.append(symusic.Tempo(0.0, 120, ttype="second"))
         track = symusic.Track(program=0, is_drum=False, ttype="second")
-        for onset, offset, pitch in zip(
-            self.onsets, self.offsets, self.pitches, strict=True
+        for onset, offset, pitch, velocity in zip(
+            self.onsets, self.offsets, self.pitches, self.velocities, strict=True
         ):
             track.notes.append(
                 symusic.Note(
-                    float(onset), float(offset - onset), int(pitch), 80, ttype="second"
+                    float(onset),
+                    float(offset - onset),
+                    int(pitch),
+                    int(velocity) or 80,
+                    ttype="second",
                 )
             )
         score.tracks.append(track)
@@ -130,6 +162,8 @@ class Notes:
 
 def notes_from_midi(data: bytes, sustain_pedal: bool) -> Notes:
     """Every pitched note in a MIDI file, pedal-extended if asked.
+
+    Velocities are kept unless every note has the same one.
 
     Read through symusic with its controllers, since the pedal is one.
     Extension follows Onsets and Frames:
@@ -147,7 +181,12 @@ def notes_from_midi(data: bytes, sustain_pedal: bool) -> Notes:
         if sustain_pedal:
             pedal = [(c.time, c.value >= 64) for c in track.controls if c.number == 64]
             notes = extend_by_pedal(notes, pedal)
-        rows.extend(notes)
+        rows.extend(
+            (*note, n.velocity) for note, n in zip(notes, track.notes, strict=True)
+        )
+    # One velocity throughout (GAPS's and GOAT's 100) says nothing of loudness.
+    if len({row[3] for row in rows}) == 1:
+        rows = [row[:3] for row in rows]
     return Notes.from_rows(rows)
 
 

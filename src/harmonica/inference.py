@@ -31,7 +31,7 @@ from harmonica.config import (
 from harmonica.corpus import Notes, Recording
 from harmonica.data import read_audio, resample
 from harmonica.decoding import Scores, decode, note_f1, score
-from harmonica.model import SILENCE, HarmonicaModel
+from harmonica.model import SILENCE, VELOCITY, HarmonicaModel
 from harmonica.requests import DEFAULT_MODEL, resolve_model
 
 # 2: the CQT is log10(1 + |X|); version 1 models read log(max(|X|, 1e-5)).
@@ -59,8 +59,11 @@ def transcribe_audio(
     chunk_seconds: float,
     batch_size: int,
     device: torch.device,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Onset and sustain probabilities for a whole recording."""
+) -> dict[str, np.ndarray]:
+    """Onset and sustain probabilities for a whole recording, by head.
+
+    And velocity, from a model with that head.
+    """
     cqt_config = model.config.cqt
     frames_per_second = cqt_config.sample_rate / cqt_config.hop_length
     # A multiple of four frames, so the kept half and both margins are whole.
@@ -80,20 +83,22 @@ def transcribe_audio(
     windows = padded.unfold(-1, chunk, keep)[:, :, :count]  # [1, F, count, chunk]
     windows = windows.permute(2, 0, 1, 3)  # [count, 1, F, chunk]
 
-    onsets, sustains = [], []
+    parts: dict[str, list[torch.Tensor]] = {}
     for first in range(0, count, batch_size):
         batch = windows[first : first + batch_size]
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
             logits = model.forward_spectrogram(batch)
         middle = slice(margin, margin + keep)
-        onsets.append(torch.sigmoid(logits["onset"][..., middle].float()))
-        sustains.append(torch.sigmoid(logits["sustain"][..., middle].float()))
+        for name in ("onset", "sustain", VELOCITY):
+            if name in logits:
+                probabilities = torch.sigmoid(logits[name][..., middle].float())
+                parts.setdefault(name, []).append(probabilities)
 
-    def stitch(parts: list[torch.Tensor]) -> np.ndarray:
-        joined = torch.cat(parts).permute(1, 0, 2).reshape(parts[0].shape[1], -1)
+    def stitch(chunks: list[torch.Tensor]) -> np.ndarray:
+        joined = torch.cat(chunks).permute(1, 0, 2).reshape(chunks[0].shape[1], -1)
         return joined[:, :total].cpu().numpy()
 
-    return stitch(onsets), stitch(sustains)
+    return {name: stitch(chunks) for name, chunks in parts.items()}
 
 
 class Harmonica:
@@ -149,8 +154,10 @@ class Harmonica:
 
     def activations(
         self, audio: str | Path | np.ndarray, sample_rate: int | None = None
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Onset and sustain probabilities ``[88, T]``, at ``frames_per_second``.
+
+        Keyed by head, with velocity too from a model that has the head.
 
         ``audio`` is a file, or samples ``[samples]`` or ``[samples, channels]``
         at ``sample_rate``, which an array must give.
@@ -174,13 +181,14 @@ class Harmonica:
         self, audio: str | Path | np.ndarray, sample_rate: int | None = None
     ) -> Notes:
         """The notes in one recording, as ``activations`` takes it."""
-        onset, sustain = self.activations(audio, sample_rate)
+        probabilities = self.activations(audio, sample_rate)
         return decode(
-            onset,
-            sustain,
+            probabilities["onset"],
+            probabilities["sustain"],
             self.frames_per_second,
             self.onset_threshold,
             self.frame_threshold,
+            probabilities.get(VELOCITY),
         )
 
 
@@ -248,7 +256,7 @@ def _run_recording(
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     began = time.perf_counter()
-    onset, sustain = transcribe_audio(
+    probabilities = transcribe_audio(
         model,
         audio,
         chunk_seconds=evaluation.chunk_seconds,
@@ -258,7 +266,14 @@ def _run_recording(
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     elapsed = time.perf_counter() - began
-    return Activations(onset, sustain, elapsed, len(audio) / sample_rate)
+    # Velocity is not scored, so not kept: a test set's activations run to
+    # gigabytes.
+    return Activations(
+        probabilities["onset"],
+        probabilities["sustain"],
+        elapsed,
+        len(audio) / sample_rate,
+    )
 
 
 # The activations a scoring pool's workers decode. Set before the pool forks,

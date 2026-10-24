@@ -33,6 +33,7 @@ from harmonica.decoding import decode, frame_f1, score
 from harmonica.inference import transcribe_audio
 from harmonica.model import (
     SILENCE,
+    VELOCITY,
     HarmonicaModel,
     ShiftAggregate,
     count_parameters,
@@ -66,6 +67,19 @@ def test_medium_has_654_291_parameters() -> None:
     model = HarmonicaModel(HarmonicaModelConfig(size="medium"))
     assert count_parameters(model) == 654_291
     assert count_parameters(model.stem) == 6_928
+
+
+def test_the_velocity_head_is_one_more_head_of_the_same_form() -> None:
+    from harmonica.config import HarmonicaHeadConfig
+
+    plain = HarmonicaModel(HarmonicaModelConfig(size="nano"))
+    config = HarmonicaModelConfig(size="nano", head=HarmonicaHeadConfig(velocity=True))
+    model = HarmonicaModel(config)
+    head = count_parameters(plain.heads["onset"])
+    assert count_parameters(model) == count_parameters(plain) + head
+    logits = model(torch.zeros(1, 16000))
+    assert sorted(logits) == sorted(["offset", "onset", "sustain", VELOCITY])
+    assert logits[VELOCITY].shape == logits["onset"].shape
 
 
 @pytest.mark.parametrize("size", list(SIZES))
@@ -191,6 +205,71 @@ def test_a_repeated_onset_ends_the_note_before_it() -> None:
     assert decoded.offsets.tolist() == [4.0, 9.0]
 
 
+def test_velocity_is_labelled_at_the_onset_frame_only() -> None:
+    notes = Notes.from_rows([(1.0, 2.0, 60, 127), (0.5, 1.5, 62, 64)])
+    labels = frame_labels(notes, 1.0, 20, 10.0)
+    assert np.flatnonzero(labels[3, 60 - MIN_PITCH]).tolist() == [0]
+    assert labels[3, 60 - MIN_PITCH, 0] == pytest.approx(1.0)
+    # The note entering the window has no onset in it, so no velocity either.
+    assert labels[3, 62 - MIN_PITCH].sum() == 0
+
+
+def test_rows_without_a_velocity_leave_it_unknown() -> None:
+    notes = Notes.from_rows([(1.0, 2.0, 60), (0.5, 1.0, 64, 90)])
+    assert notes.pitches.tolist() == [64, 60]
+    assert notes.velocities.tolist() == [90, 0]
+    assert Notes(notes.onsets, notes.offsets, notes.pitches).velocities.tolist() == [
+        0,
+        0,
+    ]
+
+
+def test_notes_saved_without_velocities_load_with_them_unknown(
+    tmp_path: Path,
+) -> None:
+    np.savez(
+        tmp_path / "old.npz",
+        onsets=np.array([0.5]),
+        offsets=np.array([1.0]),
+        pitches=np.array([60], dtype=np.int16),
+    )
+    assert Notes.load(tmp_path / "old.npz").velocities.tolist() == [0]
+    Notes.from_rows([(0.5, 1.0, 60, 77)]).save(tmp_path / "new.npz")
+    assert Notes.load(tmp_path / "new.npz").velocities.tolist() == [77]
+
+
+def test_decoding_reads_each_notes_velocity_at_its_onset() -> None:
+    onset = np.zeros((NUM_PITCHES, 10))
+    sustain = np.zeros((NUM_PITCHES, 10))
+    velocity = np.full((NUM_PITCHES, 10), 0.9)
+    onset[0, [1, 5]] = 1.0
+    sustain[0, 1:9] = 1.0
+    velocity[0, 1], velocity[0, 5] = 0.5, 0.0
+    decoded = decode(onset, sustain, 1.0, 0.5, 0.5, velocity)
+    # 0.5 * 127 rounds to 64; no note plays at velocity 0, so 0 becomes 1.
+    assert decoded.velocities.tolist() == [64, 1]
+    assert decode(onset, sustain, 1.0, 0.5, 0.5).velocities.tolist() == [0, 0]
+
+
+def test_velocity_loss_counts_only_onsets_of_known_velocity() -> None:
+    from harmonica.training import loss_terms
+
+    labels = torch.zeros(1, 4, NUM_PITCHES, 5)
+    labels[0, 3, 0, 2] = 0.5
+    logits = {
+        name: torch.zeros(1, NUM_PITCHES, 5)
+        for name in ("onset", "sustain", "offset", VELOCITY)
+    }
+    # Everywhere but the one known onset, a wildly wrong velocity costs nothing.
+    logits[VELOCITY][:] = 20.0
+    logits[VELOCITY][0, 0, 2] = 0.0
+    terms = loss_terms(logits, labels)
+    assert terms[VELOCITY].item() == pytest.approx(math.log(2))
+    assert loss_terms(logits, torch.zeros_like(labels))[VELOCITY].item() == 0.0
+    del logits[VELOCITY]
+    assert VELOCITY not in loss_terms(logits, labels)
+
+
 def test_perfect_transcription_scores_one() -> None:
     notes = _notes((0.5, 1.2, 60), (1.0, 3.0, 67))
     result = score(notes, notes)
@@ -274,13 +353,13 @@ class _FrameIndexModel(torch.nn.Module):
 @pytest.mark.parametrize("seconds", [1.0, 5.0, 12.3])
 def test_half_strategy_stitches_every_frame_once_in_order(seconds: float) -> None:
     samples = int(seconds * 16000)
-    onset, _ = transcribe_audio(
+    onset = transcribe_audio(
         _FrameIndexModel(),
         np.zeros(samples, dtype=np.float32),
         chunk_seconds=5.0,
         batch_size=3,
         device=torch.device("cpu"),
-    )
+    )["onset"]
     frames = num_frames(samples, 512)
     assert onset.shape == (NUM_PITCHES, frames)
     logits = np.log(onset[0] / (1 - onset[0]))
@@ -302,13 +381,13 @@ def test_half_strategy_pads_with_silence() -> None:
             logits = off.expand(-1, -1, cqt.shape[-1])
             return {"onset": logits, "sustain": logits, "offset": logits}
 
-    onset, _ = transcribe_audio(
+    onset = transcribe_audio(
         _PaddingModel(),
         np.zeros(int(7.3 * 16000), dtype=np.float32),
         chunk_seconds=5.0,
         batch_size=2,
         device=torch.device("cpu"),
-    )
+    )["onset"]
     np.testing.assert_allclose(onset, 0.5, atol=1e-3)
 
 
@@ -546,6 +625,17 @@ def test_notes_round_trip_through_midi(tmp_path: Path) -> None:
     assert back.pitches.tolist() == [60, 67]
     np.testing.assert_allclose(back.onsets, [0.5, 1.0], atol=2e-3)
     np.testing.assert_allclose(back.offsets, [1.25, 3.0], atol=2e-3)
+    # Unknown velocities play at 80, the same throughout, so they read unknown.
+    assert back.velocities.tolist() == [0, 0]
+
+
+def test_velocities_round_trip_through_midi(tmp_path: Path) -> None:
+    from harmonica.corpus import notes_from_midi
+
+    notes = Notes.from_rows([(0.5, 1.25, 60, 30), (1.0, 3.0, 67, 0)])
+    notes.save_midi(tmp_path / "n.mid")
+    back = notes_from_midi((tmp_path / "n.mid").read_bytes(), False)
+    assert back.velocities.tolist() == [30, 80]
 
 
 def test_counts_take_a_magnitude() -> None:
@@ -642,7 +732,8 @@ def test_harmonica_reads_a_file_as_it_reads_the_array(tmp_path: Path) -> None:
     assert (model.onset_threshold, model.frame_threshold) == (0.25, 0.45)
     from_file = model.activations(tmp_path / "a.wav")
     from_array = model.activations(audio, rate)
-    for a, b in zip(from_file, from_array, strict=True):
+    assert sorted(from_file) == sorted(from_array) == ["onset", "sustain"]
+    for a, b in zip(from_file.values(), from_array.values(), strict=True):
         assert a.shape == (88, num_frames(16000, 512))
         np.testing.assert_allclose(a, b, atol=1e-3)
     with pytest.raises(ValueError, match="sample_rate"):

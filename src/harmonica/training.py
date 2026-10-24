@@ -1,10 +1,10 @@
 """Harmonica training on Lightning Fabric.
 
-Section 4.1: summed binary cross-entropy over onset, sustain, and offset,
-100k steps at batch 8, AdamW with a cosine schedule from 2e-4. Every
-``val_freq`` steps rank 0 transcribes the whole development set at fixed
-thresholds and logs the paper's three scores; thresholds are swept only at
-evaluation.
+Section 4.1: summed binary cross-entropy over onset, sustain, and offset (and
+velocity, with the head the paper does not have), 100k steps at batch 8, AdamW
+with a cosine schedule from 2e-4. Every ``val_freq`` steps rank 0 transcribes
+the whole development set at fixed thresholds and logs the paper's three
+scores; thresholds are swept only at evaluation.
 """
 
 import math
@@ -37,7 +37,7 @@ from harmonica.inference import (
     run_recordings,
     score_all,
 )
-from harmonica.model import HEADS, HarmonicaModel, count_parameters
+from harmonica.model import HEADS, VELOCITY, HarmonicaModel, count_parameters
 from harmonica.requests import HarmonicaTrainRequest
 
 CHECKPOINT_PREFIX = "checkpoint_"
@@ -58,11 +58,24 @@ def lr_scale(step: int, config: HarmonicaConfig) -> float:
 def loss_terms(
     logits: dict[str, torch.Tensor], labels: torch.Tensor
 ) -> dict[str, torch.Tensor]:
-    """One binary cross-entropy per head, against ``labels[:, head]``."""
-    return {
+    """One binary cross-entropy per head, against ``labels[:, head]``.
+
+    Velocity, when the model has the head, is Kong et al.'s: cross-entropy
+    against ``velocity / 127``, averaged over the onset frames whose velocity
+    is known, and zero in a batch that has none.
+    """
+    terms = {
         name: F.binary_cross_entropy_with_logits(logits[name].float(), labels[:, i])
         for i, name in enumerate(HEADS)
     }
+    if VELOCITY in logits:
+        target = labels[:, len(HEADS)]
+        known = (target > 0).float()
+        each = F.binary_cross_entropy_with_logits(
+            logits[VELOCITY].float(), target, reduction="none"
+        )
+        terms[VELOCITY] = (each * known).sum() / known.sum().clamp(min=1.0)
+    return terms
 
 
 def checkpoint_path(config: HarmonicaConfig, step: int) -> Path:

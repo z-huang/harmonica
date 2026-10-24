@@ -67,6 +67,8 @@ model:
     # when unidirectional).
     hidden_size: null
     bidirectional: true
+    # Not in the paper: a fourth head, each onset's MIDI velocity.
+    velocity: false
 
 training:
   output_dir: outputs

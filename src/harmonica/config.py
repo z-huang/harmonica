@@ -102,6 +102,8 @@ class HarmonicaHeadConfig:
     # Per direction; null is the trunk's width, halved when bidirectional.
     hidden_size: int | None = None
     bidirectional: bool = True
+    # Not in the paper: a fourth head, each onset's MIDI velocity.
+    velocity: bool = False
 
 
 @dataclass

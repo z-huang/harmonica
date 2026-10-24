@@ -10,7 +10,8 @@ Section 3.3 of the paper, piece by piece:
 * ``l`` trunk blocks, each a harmonic layer ``ReLU(x + Norm(HConv(x)))`` and a
   ResNet block of two 3x3 convolutions;
 * onset, sustain, and offset heads, each a frequency-grouped LSTM and a linear
-  map to one logit per pitch and frame.
+  map to one logit per pitch and frame; optionally, not in the paper, a
+  velocity head of the same form.
 
 Instance normalization throughout, as the paper uses. The paper leaves the
 stem, the 1x1 projection, and the heads' widths unstated; these give 654,291
@@ -31,6 +32,8 @@ from harmonica.config import (
 )
 
 HEADS = ("onset", "sustain", "offset")
+# Not in the paper: each onset's velocity / 127, with model.head.velocity.
+VELOCITY = "velocity"
 
 # What silence, and the zero padding of a short clip, reads: log10(1 + 0).
 SILENCE = 0.0
@@ -239,7 +242,10 @@ def num_frames(samples: int, hop_length: int) -> int:
 
 
 class HarmonicaModel(nn.Module):
-    """Audio (or its CQT) to onset, sustain, and offset logits ``[B, 88, T]``."""
+    """Audio (or its CQT) to onset, sustain, and offset logits ``[B, 88, T]``.
+
+    And velocity logits, with ``config.head.velocity``.
+    """
 
     def __init__(self, config: HarmonicaModelConfig) -> None:
         super().__init__()
@@ -286,7 +292,7 @@ class HarmonicaModel(nn.Module):
                 name: FrequencyGroupedLSTM(
                     c2, widths.head_hidden, config.head.bidirectional
                 )
-                for name in HEADS
+                for name in (*HEADS, *((VELOCITY,) if config.head.velocity else ()))
             }
         )
 

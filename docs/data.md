@@ -29,7 +29,8 @@ text says, although Table 3 counts them.
 9.6 GB):
 
 - `manifest.jsonl`: one row per audio-note pair, with its split;
-- `notes/<source>/<key>.npz`: the notes;
+- `notes/<source>/<key>.npz`: the notes, with their MIDI velocities where the
+  annotations carry any (see [training.md](training.md#velocity));
 - `audio/<source>/<key>.flac`: 16 kHz mono copies of every recording not
   already 16 kHz mono. MAPS and GuitarSet ship their audio inside zip files,
   so it is always extracted here. The rest are copied because
