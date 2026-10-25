@@ -165,7 +165,10 @@ class FrequencyGroupedLSTM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, channels, pitches, frames = x.shape
         sequence = x.permute(0, 2, 3, 1).reshape(batch * pitches, frames, channels)
-        hidden, _ = self.lstm(sequence)
+        # Under autocast the trunk hands over bf16; some PyTorch builds (2.14's
+        # cu126 aarch64 wheel) then skip cuDNN for a per-timestep LSTM several
+        # times slower. Autocast casts fp32 back to bf16, so the math is the same.
+        hidden, _ = self.lstm(sequence.float())
         return self.linear(hidden).view(batch, pitches, frames)
 
 
