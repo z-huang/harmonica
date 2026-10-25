@@ -265,6 +265,9 @@ def test_velocity_loss_counts_only_onsets_of_known_velocity() -> None:
     logits[VELOCITY][0, 0, 2] = 0.0
     terms = loss_terms(logits, labels)
     assert terms[VELOCITY].item() == pytest.approx(math.log(2))
+    assert loss_terms(
+        logits, labels, velocity_weight=0.01
+    )[VELOCITY].item() == pytest.approx(0.01 * math.log(2))
     assert loss_terms(logits, torch.zeros_like(labels))[VELOCITY].item() == 0.0
     del logits[VELOCITY]
     assert VELOCITY not in loss_terms(logits, labels)

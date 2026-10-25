@@ -69,7 +69,10 @@ checkpoints over the baseline's.
 Not in the paper: `--override model.head.velocity=true` adds a fourth head,
 the same frequency-grouped LSTM as the other three, that predicts each onset's
 MIDI velocity (25K more parameters for medium, 4%). It trains as Kong et al.'s
-does, with cross-entropy against `velocity / 127` at onset frames only. Notes
+does, with cross-entropy against `velocity / 127` at onset frames only, then
+multiplied by `model.head.velocity_weight` (default 0.01) before it joins the
+summed loss—without that scale the sparse-onset mean stays ~0.6 while the
+frame-averaged detection losses drop to ~0.01 and the trunk is flooded. Notes
 whose velocity is unknown are left out of that loss. A note's velocity is
 unknown when its corpus gives none (MAPS's text, GuitarSet, URMP, and the
 extra corpora but Guitar-TECHS), or when a MIDI file gives every note the
