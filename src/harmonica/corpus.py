@@ -50,6 +50,9 @@ CACHE_SAMPLE_RATE = 16000
 URMP_TEST_PIECES = frozenset({1, 2, 12, 13, 24, 25, 31, 38, 39})
 # Slakh's sound-effects family is never rendered.
 SLAKH_EXCLUDED_CLASSES = frozenset({"Sound Effects", "Drums"})
+# Slakh's bass Kontakt patches sound one octave below the written MIDI
+# (YourMT3+; ethman/slakh-utils#17–18), so labels are shifted down to match.
+SLAKH_BASS_PITCH_SHIFT = -12
 
 
 @dataclass(frozen=True)
@@ -188,6 +191,24 @@ def notes_from_midi(data: bytes, sustain_pedal: bool) -> Notes:
     if len({row[3] for row in rows}) == 1:
         rows = [row[:3] for row in rows]
     return Notes.from_rows(rows)
+
+
+def shift_notes(notes: Notes, semitones: int) -> Notes:
+    """Transpose every pitch by ``semitones``, dropping notes off the 88 keys."""
+    if semitones == 0 or len(notes) == 0:
+        return notes
+    return Notes.from_rows(
+        [
+            (float(on), float(off), int(pitch) + semitones, int(velocity))
+            for on, off, pitch, velocity in zip(
+                notes.onsets,
+                notes.offsets,
+                notes.pitches,
+                notes.velocities,
+                strict=True,
+            )
+        ]
+    )
 
 
 def extend_by_pedal(
@@ -394,9 +415,9 @@ def build_job(
         notes = notes_from_midi(Path(midi).read_bytes(), sustain_pedal=False)
         return *local(audio), notes
     if job.kind == "slakh":
-        audio, midi = job.args
+        audio, midi, pitch_shift = job.args
         notes = notes_from_midi(Path(midi).read_bytes(), sustain_pedal=False)
-        return *local(audio), notes
+        return *local(audio), shift_notes(notes, pitch_shift)
     raise ValueError(f"unknown job kind {job.kind!r}")
 
 
@@ -568,6 +589,9 @@ def slakh_jobs(root: Path) -> Iterator[Job]:
     already resplit to redux moved them to ``omitted/``, which is never read.
     Table 3 counts the drum stems too (16,379 and 1,539 rows with them); the
     text excludes them, and so does this.
+
+    Bass stems shift MIDI down one octave: Slakh's bass patches sound an
+    octave below the written notes, as YourMT3+ corrects.
     """
     import yaml
 
@@ -587,12 +611,17 @@ def slakh_jobs(root: Path) -> Iterator[Job]:
                 audio = track / "stems" / f"{stem}.flac"
                 midi = track / "MIDI" / f"{stem}.mid"
                 if audio.exists() and midi.exists():
+                    pitch_shift = (
+                        SLAKH_BASS_PITCH_SHIFT
+                        if info.get("inst_class") == "Bass"
+                        else 0
+                    )
                     yield Job(
                         "slakh",
                         f"{track.name}_{stem}",
                         split,
                         "slakh",
-                        (str(audio), str(midi)),
+                        (str(audio), str(midi), pitch_shift),
                     )
 
 

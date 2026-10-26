@@ -57,4 +57,6 @@ Splits follow the paper:
 GuitarSet's JAMS annotations become MIDI through REMI-z, as in the paper.
 Slakh tracks that redux omits are listed in
 [slakh_redux.py](../src/harmonica/slakh_redux.py), taken from slakh-utils'
-`redux.json`.
+`redux.json`. Slakh Bass stems shift MIDI down one octave so the labels match
+the sounding pitch (YourMT3+; Slakh's bass Kontakt patches render an octave
+below the written notes).

@@ -592,7 +592,7 @@ def test_gaps_uses_its_own_split_column_and_drops_unsplit_rows(
 def test_slakh_reads_redux_only(tmp_path: Path) -> None:
     import yaml
 
-    from harmonica.corpus import slakh_jobs
+    from harmonica.corpus import SLAKH_BASS_PITCH_SHIFT, slakh_jobs
     from harmonica.slakh_redux import REDUX_OMITTED_TRACKS
 
     assert len(REDUX_OMITTED_TRACKS) == 2100 - 1710
@@ -600,6 +600,7 @@ def test_slakh_reads_redux_only(tmp_path: Path) -> None:
         "S00": {"inst_class": "Piano", "audio_rendered": True, "midi_saved": True},
         "S01": {"inst_class": "Drums", "is_drum": True, "audio_rendered": True},
         "S02": {"inst_class": "Bass", "audio_rendered": False, "midi_saved": True},
+        "S03": {"inst_class": "Bass", "audio_rendered": True, "midi_saved": True},
     }
     # Track00049 is the first redux omits.
     for split, number in (("train", 1), ("train", 49), ("test", 1501)):
@@ -610,10 +611,41 @@ def test_slakh_reads_redux_only(tmp_path: Path) -> None:
         for stem in stems:
             (track / "stems" / f"{stem}.flac").touch()
             (track / "MIDI" / f"{stem}.mid").touch()
-    assert [(j.key, j.split) for j in slakh_jobs(tmp_path)] == [
+    jobs = list(slakh_jobs(tmp_path))
+    assert [(j.key, j.split) for j in jobs] == [
         ("Track00001_S00", "train"),
+        ("Track00001_S03", "train"),
         ("Track01501_S00", "test"),
+        ("Track01501_S03", "test"),
     ]
+    by_key = {j.key: j for j in jobs}
+    assert by_key["Track00001_S00"].args[2] == 0
+    assert by_key["Track00001_S03"].args[2] == SLAKH_BASS_PITCH_SHIFT
+
+
+def test_shift_notes_drops_keys_off_the_piano() -> None:
+    from harmonica.corpus import shift_notes
+
+    notes = _notes((0.0, 1.0, 24), (1.0, 2.0, 60), (2.0, 3.0, 108))
+    down = shift_notes(notes, -12)
+    assert down.pitches.tolist() == [48, 96]
+    assert shift_notes(notes, 0) is notes
+
+
+def test_slakh_build_job_shifts_bass_down_an_octave(tmp_path: Path) -> None:
+    import soundfile as sf
+
+    from harmonica.corpus import Job, build_job
+
+    audio = tmp_path / "bass.flac"
+    midi = tmp_path / "bass.mid"
+    sf.write(audio, np.zeros(16000, dtype=np.float32), 16000)
+    _notes((0.0, 1.0, 48), (1.0, 2.0, 60)).save_midi(midi)
+    _, _, notes = build_job(
+        Job("slakh", "bass", "train", "slakh", (str(audio), str(midi), -12)),
+        tmp_path,
+    )
+    assert notes.pitches.tolist() == [36, 48]
 
 
 # ------------------------------------------------------------------------- cli
