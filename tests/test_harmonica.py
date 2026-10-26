@@ -787,7 +787,8 @@ def test_every_bundled_size_is_the_size_it_is_named_for() -> None:
         assert set(stored["thresholds"]) == {"onset", "frame"}
     medium = read_checkpoint(PRETRAINED["medium"])
     assert medium["config"]["model"]["head"]["bidirectional"] is True
-    assert medium["thresholds"] == {"onset": 0.25, "frame": 0.45}
+    assert medium["config"]["model"]["head"]["velocity"] is True
+    assert medium["thresholds"] == {"onset": 0.2, "frame": 0.45}
     assert read_checkpoint(PRETRAINED["nano"])["thresholds"] == {
         "onset": 0.2,
         "frame": 0.45,
@@ -801,8 +802,8 @@ def test_every_bundled_size_is_the_size_it_is_named_for() -> None:
         "frame": 0.45,
     }
     assert read_checkpoint(PRETRAINED["x-large"])["thresholds"] == {
-        "onset": 0.25,
-        "frame": 0.45,
+        "onset": 0.2,
+        "frame": 0.4,
     }
 
 

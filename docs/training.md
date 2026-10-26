@@ -82,9 +82,9 @@ velocity read at each onset, where it is otherwise 80 throughout.
 
 Velocities reach the cache's note files only from `harmonica prepare`, so a
 cache prepared before them must be prepared again. That rereads the
-annotations but keeps the cached audio. Velocity is not scored, and the
-default stays off, so the reproduction's parameter counts and the bundled
-weights are unchanged.
+annotations but keeps the cached audio. Velocity is not scored. Training
+still defaults it off; the bundled weights in `src/harmonica/weights/` are
+the velocity runs reported in [results.md](results.md).
 
 ## The recipe
 
