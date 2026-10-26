@@ -68,8 +68,9 @@ model:
     hidden_size: null
     bidirectional: true
     # Not in the paper: a fourth head, each onset's MIDI velocity.
-    velocity: false
+    velocity: true
     # Scales the velocity BCE in the summed loss (detection heads stay at 1).
+    # Equal weight (~1) lets velocity dominate; 0.01 keeps it near detection scale.
     velocity_weight: 0.01
 
 training:
