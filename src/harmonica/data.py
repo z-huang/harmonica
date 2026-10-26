@@ -59,17 +59,23 @@ def resample(audio: np.ndarray, rate: int, sample_rate: int) -> np.ndarray:
 def frame_labels(
     notes: Notes, start: float, frames: int, frames_per_second: float
 ) -> np.ndarray:
-    """``[3, 88, frames]`` onset, sustain, and offset targets for one window.
+    """``[4, 88, frames]`` onset, sustain, offset, and velocity targets.
 
     A note sustains from its onset frame up to, not including, its offset
     frame, and always for at least one frame. An onset or offset outside the
-    window is not labelled, so a note entering mid-sustain carries none.
+    window is not labelled, so a note entering mid-sustain carries none. The
+    velocity, as ``velocity / 127``, sits at the onset frame; 0 there is
+    unknown.
     """
-    labels = np.zeros((3, NUM_PITCHES, frames), dtype=np.float32)
+    labels = np.zeros((4, NUM_PITCHES, frames), dtype=np.float32)
     end = start + frames / frames_per_second
     active = (notes.offsets > start) & (notes.onsets < end)
-    for onset, offset, pitch in zip(
-        notes.onsets[active], notes.offsets[active], notes.pitches[active], strict=True
+    for onset, offset, pitch, velocity in zip(
+        notes.onsets[active],
+        notes.offsets[active],
+        notes.pitches[active],
+        notes.velocities[active],
+        strict=True,
     ):
         row = int(pitch) - MIN_PITCH
         on = int(round((onset - start) * frames_per_second))
@@ -77,6 +83,7 @@ def frame_labels(
         off = max(off, on + 1)
         if 0 <= on < frames:
             labels[0, row, on] = 1.0
+            labels[3, row, on] = velocity / 127
         labels[1, row, max(on, 0) : min(off, frames)] = 1.0
         if 0 <= off < frames:
             labels[2, row, off] = 1.0
@@ -89,7 +96,7 @@ def _notes(path: str) -> Notes:
 
 
 class ClipStream(IterableDataset):
-    """An endless stream of ``(audio [samples], labels [3, 88, T])`` clips."""
+    """An endless stream of ``(audio [samples], labels [4, 88, T])`` clips."""
 
     def __init__(
         self,

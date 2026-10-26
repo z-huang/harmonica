@@ -102,6 +102,12 @@ class HarmonicaHeadConfig:
     # Per direction; null is the trunk's width, halved when bidirectional.
     hidden_size: int | None = None
     bidirectional: bool = True
+    # Not in the paper: a fourth head, each onset's MIDI velocity.
+    velocity: bool = False
+    # Multiplier on the velocity BCE before it joins the sum. Onset / sustain /
+    # offset are means over every frame and shrink to ~0.01; velocity is a mean
+    # over sparse known onsets and stays ~0.6, so equal weight floods the trunk.
+    velocity_weight: float = 0.01
 
 
 @dataclass
@@ -260,6 +266,11 @@ def validate_config(config: HarmonicaConfig, source: str | Path) -> None:
             _positive(value, f"model.{name}", source)
     if model.head.hidden_size is not None:
         _positive(model.head.hidden_size, "model.head.hidden_size", source)
+    if model.head.velocity_weight < 0:
+        raise ValueError(
+            f"{source}: model.head.velocity_weight must not be negative, "
+            f"got {model.head.velocity_weight!r}"
+        )
     if model.harmonic.kind not in HARMONIC_KINDS:
         raise ValueError(
             f"{source}: model.harmonic.kind must be one of "

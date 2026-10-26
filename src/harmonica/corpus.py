@@ -3,7 +3,8 @@
 ``prepare`` walks every configured source once and writes, under
 ``data.cache_dir``:
 
-* ``notes/<source>/<key>.npz`` -- onset, offset (seconds), and pitch arrays;
+* ``notes/<source>/<key>.npz`` -- onset, offset (seconds), pitch, and velocity
+  arrays;
 * ``audio/<source>/<key>.flac`` -- 16 kHz mono, for sources whose audio is only
   readable inside a zip (MAPS here) or that need mixing first
   (GuitarSet's pickup, summed from its six hexaphonic strings), and, with
@@ -49,6 +50,9 @@ CACHE_SAMPLE_RATE = 16000
 URMP_TEST_PIECES = frozenset({1, 2, 12, 13, 24, 25, 31, 38, 39})
 # Slakh's sound-effects family is never rendered.
 SLAKH_EXCLUDED_CLASSES = frozenset({"Sound Effects", "Drums"})
+# Slakh's bass Kontakt patches sound one octave below the written MIDI
+# (YourMT3+; ethman/slakh-utils#17–18), so labels are shifted down to match.
+SLAKH_BASS_PITCH_SHIFT = -12
 
 
 @dataclass(frozen=True)
@@ -69,11 +73,22 @@ class Recording:
 
 @dataclass(frozen=True)
 class Notes:
-    """Notes as three parallel arrays, in seconds and MIDI pitch."""
+    """Notes as parallel arrays, in seconds, MIDI pitch, and MIDI velocity.
+
+    A velocity of 0, which no MIDI note-on carries, is unknown: the annotation
+    gives none, or gives every note the same one.
+    """
 
     onsets: np.ndarray
     offsets: np.ndarray
     pitches: np.ndarray
+    velocities: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.velocities is None:
+            object.__setattr__(
+                self, "velocities", np.zeros(len(self.pitches), dtype=np.uint8)
+            )
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,42 +97,62 @@ class Notes:
             onsets=self.onsets.astype(np.float64),
             offsets=self.offsets.astype(np.float64),
             pitches=self.pitches.astype(np.int16),
+            velocities=self.velocities.astype(np.uint8),
         )
 
     @classmethod
     def load(cls, path: str | Path) -> "Notes":
+        """Notes saved before velocities were kept load with them unknown."""
         with np.load(path) as stored:
-            return cls(stored["onsets"], stored["offsets"], stored["pitches"])
+            velocities = stored["velocities"] if "velocities" in stored else None
+            return cls(
+                stored["onsets"], stored["offsets"], stored["pitches"], velocities
+            )
 
     @classmethod
-    def from_rows(cls, rows: list[tuple[float, float, int]]) -> "Notes":
-        """Keep the notes on the 88 keys that last a positive time, sorted."""
+    def from_rows(
+        cls, rows: list[tuple[float, float, int] | tuple[float, float, int, int]]
+    ) -> "Notes":
+        """Keep the notes on the 88 keys that last a positive time, sorted.
+
+        A row is ``(onset, offset, pitch)``, or with a velocity after; without
+        one the velocity is unknown.
+        """
         kept = sorted(
-            (on, off, p)
-            for on, off, p in rows
+            (on, off, p, *(rest or (0,)))
+            for on, off, p, *rest in rows
             if MIN_PITCH <= p <= MAX_PITCH and off > on
         )
         if not kept:
             return cls(np.zeros(0), np.zeros(0), np.zeros(0, dtype=np.int16))
-        on, off, pitch = zip(*kept, strict=True)
-        return cls(np.array(on), np.array(off), np.array(pitch, dtype=np.int16))
+        on, off, pitch, velocity = zip(*kept, strict=True)
+        return cls(
+            np.array(on),
+            np.array(off),
+            np.array(pitch, dtype=np.int16),
+            np.array(velocity, dtype=np.uint8),
+        )
 
     def __len__(self) -> int:
         return len(self.pitches)
 
     def save_midi(self, path: str | Path) -> None:
-        """One piano track at 120 BPM, every note at velocity 80."""
+        """One piano track at 120 BPM; a note of unknown velocity plays at 80."""
         import symusic
 
         score = symusic.Score(480, ttype="second")
         score.tempos.append(symusic.Tempo(0.0, 120, ttype="second"))
         track = symusic.Track(program=0, is_drum=False, ttype="second")
-        for onset, offset, pitch in zip(
-            self.onsets, self.offsets, self.pitches, strict=True
+        for onset, offset, pitch, velocity in zip(
+            self.onsets, self.offsets, self.pitches, self.velocities, strict=True
         ):
             track.notes.append(
                 symusic.Note(
-                    float(onset), float(offset - onset), int(pitch), 80, ttype="second"
+                    float(onset),
+                    float(offset - onset),
+                    int(pitch),
+                    int(velocity) or 80,
+                    ttype="second",
                 )
             )
         score.tracks.append(track)
@@ -130,6 +165,8 @@ class Notes:
 
 def notes_from_midi(data: bytes, sustain_pedal: bool) -> Notes:
     """Every pitched note in a MIDI file, pedal-extended if asked.
+
+    Velocities are kept unless every note has the same one.
 
     Read through symusic with its controllers, since the pedal is one.
     Extension follows Onsets and Frames:
@@ -147,8 +184,31 @@ def notes_from_midi(data: bytes, sustain_pedal: bool) -> Notes:
         if sustain_pedal:
             pedal = [(c.time, c.value >= 64) for c in track.controls if c.number == 64]
             notes = extend_by_pedal(notes, pedal)
-        rows.extend(notes)
+        rows.extend(
+            (*note, n.velocity) for note, n in zip(notes, track.notes, strict=True)
+        )
+    # One velocity throughout (GAPS's and GOAT's 100) says nothing of loudness.
+    if len({row[3] for row in rows}) == 1:
+        rows = [row[:3] for row in rows]
     return Notes.from_rows(rows)
+
+
+def shift_notes(notes: Notes, semitones: int) -> Notes:
+    """Transpose every pitch by ``semitones``, dropping notes off the 88 keys."""
+    if semitones == 0 or len(notes) == 0:
+        return notes
+    return Notes.from_rows(
+        [
+            (float(on), float(off), int(pitch) + semitones, int(velocity))
+            for on, off, pitch, velocity in zip(
+                notes.onsets,
+                notes.offsets,
+                notes.pitches,
+                notes.velocities,
+                strict=True,
+            )
+        ]
+    )
 
 
 def extend_by_pedal(
@@ -355,9 +415,9 @@ def build_job(
         notes = notes_from_midi(Path(midi).read_bytes(), sustain_pedal=False)
         return *local(audio), notes
     if job.kind == "slakh":
-        audio, midi = job.args
+        audio, midi, pitch_shift = job.args
         notes = notes_from_midi(Path(midi).read_bytes(), sustain_pedal=False)
-        return *local(audio), notes
+        return *local(audio), shift_notes(notes, pitch_shift)
     raise ValueError(f"unknown job kind {job.kind!r}")
 
 
@@ -529,6 +589,9 @@ def slakh_jobs(root: Path) -> Iterator[Job]:
     already resplit to redux moved them to ``omitted/``, which is never read.
     Table 3 counts the drum stems too (16,379 and 1,539 rows with them); the
     text excludes them, and so does this.
+
+    Bass stems shift MIDI down one octave: Slakh's bass patches sound an
+    octave below the written notes, as YourMT3+ corrects.
     """
     import yaml
 
@@ -548,12 +611,17 @@ def slakh_jobs(root: Path) -> Iterator[Job]:
                 audio = track / "stems" / f"{stem}.flac"
                 midi = track / "MIDI" / f"{stem}.mid"
                 if audio.exists() and midi.exists():
+                    pitch_shift = (
+                        SLAKH_BASS_PITCH_SHIFT
+                        if info.get("inst_class") == "Bass"
+                        else 0
+                    )
                     yield Job(
                         "slakh",
                         f"{track.name}_{stem}",
                         split,
                         "slakh",
-                        (str(audio), str(midi)),
+                        (str(audio), str(midi), pitch_shift),
                     )
 
 

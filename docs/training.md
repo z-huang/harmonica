@@ -64,6 +64,28 @@ checkpoints over the baseline's.
 `--resume none` starts fresh, and `--resume PATH` resumes from a given file.
 `--max-steps` accepts `100k` or `1m`.
 
+## Velocity
+
+Not in the paper: `--override model.head.velocity=true` adds a fourth head,
+the same frequency-grouped LSTM as the other three, that predicts each onset's
+MIDI velocity (25K more parameters for medium, 4%). It trains as Kong et al.'s
+does, with cross-entropy against `velocity / 127` at onset frames only, then
+multiplied by `model.head.velocity_weight` (default 0.01) before it joins the
+summed loss—without that scale the sparse-onset mean stays ~0.6 while the
+frame-averaged detection losses drop to ~0.01 and the trunk is flooded. Notes
+whose velocity is unknown are left out of that loss. A note's velocity is
+unknown when its corpus gives none (MAPS's text, GuitarSet, URMP, and the
+extra corpora but Guitar-TECHS), or when a MIDI file gives every note the
+same one (GAPS, GOAT, and about half of EGDB). That leaves MAESTRO, Slakh,
+the rest of EGDB, and Guitar-TECHS. The transcribed MIDI then carries the
+velocity read at each onset, where it is otherwise 80 throughout.
+
+Velocities reach the cache's note files only from `harmonica prepare`, so a
+cache prepared before them must be prepared again. That rereads the
+annotations but keeps the cached audio. Velocity is not scored. Training
+still defaults it off; the bundled weights in `src/harmonica/weights/` are
+the velocity runs reported in [results.md](results.md).
+
 ## The recipe
 
 Training follows Section 4.1 and Appendix D. Each 5 s clip is drawn in three

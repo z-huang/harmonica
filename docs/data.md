@@ -29,7 +29,8 @@ text says, although Table 3 counts them.
 9.6 GB):
 
 - `manifest.jsonl`: one row per audio-note pair, with its split;
-- `notes/<source>/<key>.npz`: the notes;
+- `notes/<source>/<key>.npz`: the notes, with their MIDI velocities where the
+  annotations carry any (see [training.md](training.md#velocity));
 - `audio/<source>/<key>.flac`: 16 kHz mono copies of every recording not
   already 16 kHz mono. MAPS and GuitarSet ship their audio inside zip files,
   so it is always extracted here. The rest are copied because
@@ -56,4 +57,6 @@ Splits follow the paper:
 GuitarSet's JAMS annotations become MIDI through REMI-z, as in the paper.
 Slakh tracks that redux omits are listed in
 [slakh_redux.py](../src/harmonica/slakh_redux.py), taken from slakh-utils'
-`redux.json`.
+`redux.json`. Slakh Bass stems shift MIDI down one octave so the labels match
+the sounding pitch (YourMT3+; Slakh's bass Kontakt patches render an octave
+below the written notes).

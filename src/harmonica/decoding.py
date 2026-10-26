@@ -3,7 +3,8 @@
 Decoding is the paper's ``g``: an onset is a peak of the onset activation at or
 above its threshold, and the note it opens lasts while the sustain activation
 stays at or above a separate threshold. The offset activation is training
-signal only and plays no part here.
+signal only and plays no part here. A velocity activation, from a model with
+that head, gives each note the velocity read at its onset frame.
 """
 
 from dataclasses import dataclass
@@ -20,15 +21,17 @@ def decode(
     frames_per_second: float,
     onset_threshold: float,
     frame_threshold: float,
+    velocity: np.ndarray | None = None,
 ) -> Notes:
     """``[88, T]`` probabilities to notes.
 
     A note opened at frame ``t`` ends at the first later frame whose sustain
     falls below ``frame_threshold``, or at the key's next onset, whichever
-    comes first, and always lasts at least one frame.
+    comes first, and always lasts at least one frame. Without ``velocity``,
+    every note's velocity is unknown.
     """
     pitches, frames = onset.shape
-    rows: list[tuple[float, float, int]] = []
+    rows: list[tuple[float, float, int, int]] = []
     previous = np.pad(onset, ((0, 0), (1, 0)), constant_values=-1.0)[:, :-1]
     following = np.pad(onset, ((0, 0), (0, 1)), constant_values=-1.0)[:, 1:]
     peaks = (onset >= onset_threshold) & (onset >= previous) & (onset > following)
@@ -45,8 +48,16 @@ def decode(
             if here + 1 < len(starts):
                 end = min(end, starts[here + 1])
             end = max(end, start + 1)
+            loudness = 0
+            if velocity is not None:
+                loudness = int(np.clip(round(velocity[row, start] * 127), 1, 127))
             rows.append(
-                (start / frames_per_second, end / frames_per_second, MIN_PITCH + row)
+                (
+                    start / frames_per_second,
+                    end / frames_per_second,
+                    MIN_PITCH + row,
+                    loudness,
+                )
             )
     return Notes.from_rows(rows)
 

@@ -8,7 +8,9 @@ goes in and its notes come out as MIDI, with no instrument label anywhere.
 This is not the authors' code. Everything here was rebuilt from the paper.
 Where the paper leaves a detail unspecified, we filled it in with our own
 assumptions, so this implementation is not guaranteed to match the authors'
-exactly.
+exactly. One deliberate addition beyond the paper is a **velocity head**: the
+bundled models predict MIDI velocity at each onset, so the transcribed MIDI
+carries dynamics instead of a flat default.
 
 ## Transcribe a recording
 
@@ -30,11 +32,11 @@ the mean **OnP / OnPOff / Frm** over the paper's eight test sets:
 
 | Variant          | Params | Ours               | Paper              |
 | ---------------- | ------ | ------------------ | ------------------ |
-| nano             | 25K    | .791 / .524 / .763 | .808 / .547 / .773 |
-| small            | 131K   | .835 / .603 / .804 | .854 / .638 / .815 |
-| medium (default) | 654K   | .862 / .660 / .827 | .879 / .687 / .838 |
-| large            | 3.1M   | .877 / .688 / .843 | .891 / .713 / .848 |
-| x-large          | 14.7M  | .882 / .694 / .843 | .895 / .721 / .852 |
+| nano             | 26.3K  | .800 / .530 / .772 | .808 / .547 / .773 |
+| small            | 137K   | .841 / .617 / .809 | .854 / .638 / .815 |
+| medium (default) | 679K   | .864 / .661 / .833 | .879 / .687 / .838 |
+| large            | 3.2M   | .878 / .687 / .840 | .891 / .713 / .848 |
+| x-large          | 15.1M  | .879 / .695 / .846 | .895 / .721 / .852 |
 
 
 [docs/results.md](docs/results.md) breaks the scores down by test set.

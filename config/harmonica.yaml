@@ -67,6 +67,10 @@ model:
     # when unidirectional).
     hidden_size: null
     bidirectional: true
+    # Not in the paper: a fourth head, each onset's MIDI velocity.
+    velocity: false
+    # Scales the velocity BCE in the summed loss (detection heads stay at 1).
+    velocity_weight: 0.01
 
 training:
   output_dir: outputs
