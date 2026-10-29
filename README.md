@@ -1,5 +1,8 @@
 # Harmonica
 
+[![PyPI](https://img.shields.io/pypi/v/harmonica-amt)](https://pypi.org/project/harmonica-amt/)
+[![arXiv](https://img.shields.io/badge/arXiv-2609.04640-b31b1b)](https://arxiv.org/abs/2609.04640)
+
 An independent reproduction of *[Harmonica: Accurate and Lightweight
 Instrument-Agnostic Music Transcription](https://arxiv.org/abs/2609.04640)* (Ou,
 Martel, Hennessy-Priest, Cho; arXiv:2609.04640). Audio of one pitched instrument
